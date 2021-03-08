@@ -2406,8 +2406,17 @@ WI._downloadWebArchive = function(event)
 
 WI._reloadInspectedInspector = function()
 {
-    const options = {};
-    WI.runtimeManager.evaluateInInspectedWindow(`InspectorFrontendHost.reopen()`, options, function(){});
+    if (WI.targets.length > 1)
+        console.warn("WI.targets", WI.targets);
+
+    for (let target of WI.targets) {
+        target.PageAgent.reload.invoke({ignoreCache: true}, function() {
+            setTimeout(function() {
+                const options = {};
+                WI.runtimeManager.evaluateInInspectedWindow("InspectorFrontendHost.reopen()", options, function(){});
+            }, 1000);
+        });
+    }
 };
 
 WI._reloadPage = function(event)
