@@ -29,4 +29,9 @@ WI.GenericResourceContentView = class GenericResourceContentView extends WI.Reso
     {
         super(resource, "generic");
     }
+
+    contentAvailable(content, base64Encoded)
+    {
+        // Do nothing.
+    }
 };

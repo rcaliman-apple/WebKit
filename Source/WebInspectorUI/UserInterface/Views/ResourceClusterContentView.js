@@ -519,6 +519,7 @@ WI.ResourceClusterContentView = class ResourceClusterContentView extends WI.Clus
                     previousSibling: this._responsePathComponent,
                 });
 
+                this._showContentViewForIdentifier(ResourceClusterContentView.Identifier.ResponseJSON);
                 this.dispatchEventToListeners(WI.ContentView.Event.SelectionPathComponentsDidChange);
                 return;
             }
