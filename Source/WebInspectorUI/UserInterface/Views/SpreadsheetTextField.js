@@ -189,9 +189,16 @@ WI.SpreadsheetTextField = class SpreadsheetTextField
 
     completionSuggestionsClickedCompletion(suggestionsView, completionText)
     {
+        let newCaretPosition;
+        if (this._completionText.endsWith("()"))
+            newCaretPosition = this._getCaretPositionAtEndOfCompletion(-1);
+        else
+            newCaretPosition = this._getCaretPositionAtEndOfCompletion();
+
+        // TODO: figure out bug with clicking on non-selected completion from suggestion slist
         this._completionText = completionText;
         this._updatePendingValueWithCompletionText();
-        this._applyPendingValue({moveCaretToEndOfCompletion: true});
+        this._applyPendingValue({newCaretPosition});
         this.discardCompletion();
 
         if (this._delegate && typeof this._delegate.spreadsheetTextFieldDidChange === "function")
@@ -238,8 +245,16 @@ WI.SpreadsheetTextField = class SpreadsheetTextField
         if (document.activeElement === this._element)
             return;
 
-        this._applyPendingValue();
+        let newCaretPosition;
+        // Move caret between the parentheses of the completion.
+        if (this._completionText.endsWith("()"))
+            newCaretPosition = this._getCaretPositionAtEndOfCompletion(-1);
+
+        this._applyPendingValue({newCaretPosition});
         this.discardCompletion();
+
+        if (newCaretPosition)
+            return;
 
         let changed = this._valueBeforeEditing !== this.value;
         this._delegate.spreadsheetTextFieldDidBlur(this, event, changed);
@@ -271,7 +286,16 @@ WI.SpreadsheetTextField = class SpreadsheetTextField
         let isTabKey = event.key === "Tab";
         if (isEnterKey || isTabKey) {
             event.stop();
-            this._applyPendingValue();
+
+            let newCaretPosition;
+            // Move caret between the parentheses of the completion.
+            if (this._completionText.endsWith("()"))
+                newCaretPosition = this._getCaretPositionAtEndOfCompletion(-1);
+
+            this._applyPendingValue({newCaretPosition});
+
+            if (newCaretPosition)
+                return;
 
             let direction = (isTabKey && event.shiftKey) ? "backward" : "forward";
 
@@ -362,7 +386,14 @@ WI.SpreadsheetTextField = class SpreadsheetTextField
 
             if (selection.isCollapsed) {
                 event.stop();
-                this._applyPendingValue({moveCaretToEndOfCompletion: true});
+
+                let newCaretPosition;
+                if (this._completionText.endsWith("()"))
+                    newCaretPosition = this._getCaretPositionAtEndOfCompletion(-1);
+                else
+                    newCaretPosition = this._getCaretPositionAtEndOfCompletion();
+
+                this._applyPendingValue({newCaretPosition});
 
                 // When completing "background", don't hide the completion popover.
                 // Continue showing the popover with properties such as "background-color" and "background-image".
@@ -508,6 +539,15 @@ WI.SpreadsheetTextField = class SpreadsheetTextField
         return multilineRange.toString().length;
     }
 
+    _getCaretPositionAtEndOfCompletion(offset)
+    {
+        let caretPosition = this._getCaretPosition() - this._completionPrefix.length + this._completionText.length + offset;
+        // TODO: account for this._pendingValue being null
+        console.assert(caretPosition >= 0 && caretPosition < this._pendingValue.length, caretPosition, "Caret position must be within the value.");
+
+        return caretPosition;
+    }
+
     _getCaretRect(caretPosition)
     {
         let isHidden = (clientRect) => {
@@ -548,13 +588,13 @@ WI.SpreadsheetTextField = class SpreadsheetTextField
         return range;
     }
 
-    _applyPendingValue({moveCaretToEndOfCompletion} = {})
+    _applyPendingValue({newCaretPosition} = {})
     {
         if (!this._pendingValue)
             return;
 
-        let caretPosition = this._getCaretPosition();
-        let newCaretPosition = moveCaretToEndOfCompletion ? caretPosition - this._completionPrefix.length + this._completionText.length : caretPosition;
+        if (!newCaretPosition)
+            newCaretPosition = this._getCaretPosition();
 
         // Setting the value collapses the text selection. Get the caret position before doing this.
         this.value = this._pendingValue;
@@ -570,7 +610,7 @@ WI.SpreadsheetTextField = class SpreadsheetTextField
         let caretPosition = this._getCaretPosition();
         let value = this.valueWithoutSuggestion();
 
-        this._pendingValue = value.slice(0, caretPosition - this._completionPrefix.length) + this._completionText + value.slice(caretPosition + 1, value.length);
+        this._pendingValue = value.slice(0, caretPosition - this._completionPrefix.length) + this._completionText + value.slice(caretPosition, value.length);
     }
 
     _reAttachSuggestionHint()
