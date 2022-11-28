@@ -46,8 +46,6 @@ WI.CSSManager = class CSSManager extends WI.Object
         this._styleSheetFrameURLMap = new Map;
         this._nodeStylesMap = {};
         this._modifiedStyles = new Map;
-        this._defaultAppearance = null;
-        this._forcedAppearance = null;
         this._defaultUserPreferences = new Map;
         this._overridenUserPreferences = new Map;
         this._propertyNameCompletions = null;
@@ -306,21 +304,22 @@ WI.CSSManager = class CSSManager extends WI.Object
         return Array.from(this._styleSheetIdentifierMap.values());
     }
 
-    get defaultAppearance()
+    get defaultUserPreferences()
     {
-        return this._defaultAppearance;
+        return this._defaultUserPreferences;
     }
 
-    get forcedAppearance()
+    set defaultUserPreferences(userPreferences)
     {
-        return this._forcedAppearance;
+        for (let userPreference of userPreferences)
+            this.defaultUserPreferences.set(userPreference.name, userPreference.value)
     }
 
-    set forcedAppearance(name)
-    {
-        if (!this.canForceAppearance())
-            return;
+    get overridenUserPreferences() { return this._overridenUserPreferences; }
 
+    // COMPATIBILITY (macOS 13, iOS 16.0): `Page.setForcedAppearance()` was removed in favor of `Page.overrideUserPreference()`
+    setForcedAppearance(name)
+    {
         let commandArguments = {};
 
         switch (name) {
@@ -345,13 +344,8 @@ WI.CSSManager = class CSSManager extends WI.Object
             return;
         }
 
-        this._forcedAppearance = name || null;
-
         let target = WI.assumingMainTarget();
-        target.PageAgent.setForcedAppearance.invoke(commandArguments).then(() => {
-            this.mediaQueryResultChanged();
-            this.dispatchEventToListeners(WI.CSSManager.Event.ForcedAppearanceDidChange, {appearance: this._forcedAppearance});
-        });
+        return target.PageAgent.setForcedAppearance.invoke(commandArguments);
     }
 
     set layoutContextTypeChangedMode(layoutContextTypeChangedMode)
@@ -361,11 +355,6 @@ WI.CSSManager = class CSSManager extends WI.Object
             if (target.hasCommand("CSS.setLayoutContextTypeChangedMode"))
                 target.CSSAgent.setLayoutContextTypeChangedMode(layoutContextTypeChangedMode);
         }
-    }
-
-    canForceAppearance()
-    {
-        return InspectorBackend.hasCommand("Page.setForcedAppearance") && this._defaultAppearance;
     }
 
     canForcePseudoClass(pseudoClass)
@@ -396,19 +385,26 @@ WI.CSSManager = class CSSManager extends WI.Object
 
     overrideUserPreference(preference, value)
     {
+        let promises = [];
         for (let target of WI.targets) {
             // COMPATIBILITY (macOS 13.0, iOS 16.0): `Page.overrideUserPreference()` did not exist yet.
-            if (target.hasCommand("Page.overrideUserPreference")) {
-                target.PageAgent.overrideUserPreference(preference, value);
+            if (target.hasCommand("Page.overrideUserPreference") && InspectorBackend.Enum.Page.UserPreferenceName[preference])
+                promises.push(target.PageAgent.overrideUserPreference(preference, value));
 
-                if (value)
-                    this._overridenUserPreferences.set(preference, value);
-                else
-                    this._overridenUserPreferences.delete(preference);
-            }
+            // COMPATIBILITY (macOS 13, iOS 16.0): `Page.setForcedAppearance()` was removed in favor of `Page.overrideUserPreference()`
+            if (preference === WI.CSSManager.ForcedAppearancePreference && target.hasCommand("Page.setForcedAppearance"))
+                promises.push(this.setForcedAppearance(value || null));
         }
 
-        this.dispatchEventToListeners(WI.CSSManager.Event.OverridenUserPreferencesDidChange);
+        if (value)
+            this._overridenUserPreferences.set(preference, value);
+        else
+            this._overridenUserPreferences.delete(preference);
+
+        Promise.allSettled(promises).then(() => {
+            this.mediaQueryResultChanged();
+            this.dispatchEventToListeners(WI.CSSManager.Event.OverridenUserPreferencesDidChange);
+        })
     }
 
     propertyNameHasOtherVendorPrefix(name)
@@ -528,8 +524,11 @@ WI.CSSManager = class CSSManager extends WI.Object
 
     // PageObserver
 
+    // COMPATIBILITY (macOS 13, iOS 16.0): `Page.defaultAppearanceDidChange` was removed in favor of `Page.defaultUserPreferencesDidChange`
     defaultAppearanceDidChange(protocolName)
     {
+        console.assert(InspectorBackend.Enum.Page.Appearance, "Legacy protocol: Appearance type missing from Page domain.", protocolName);
+
         let appearance = null;
 
         switch (protocolName) {
@@ -546,11 +545,11 @@ WI.CSSManager = class CSSManager extends WI.Object
             break;
         }
 
-        this._defaultAppearance = appearance;
-
         this.mediaQueryResultChanged();
 
-        this.dispatchEventToListeners(WI.CSSManager.Event.DefaultAppearanceDidChange, {appearance});
+        this._defaultUserPreferences.set(WI.CSSManager.ForcedAppearancePreference, appearance);
+
+        this.dispatchEventToListeners(WI.CSSManager.Event.DefaultUserPreferencesDidChange);
     }
 
     defaultUserPreferencesDidChange(userPreferences)
@@ -645,7 +644,6 @@ WI.CSSManager = class CSSManager extends WI.Object
         this._styleSheetIdentifierMap.clear();
         this._styleSheetFrameURLMap.clear();
         this._modifiedStyles.clear();
-        this._forcedAppearance = null;
 
         this._nodeStylesMap = {};
     }
@@ -842,17 +840,17 @@ WI.CSSManager.Event = {
     StyleSheetAdded: "css-manager-style-sheet-added",
     StyleSheetRemoved: "css-manager-style-sheet-removed",
     ModifiedStylesChanged: "css-manager-modified-styles-changed",
-    DefaultAppearanceDidChange: "css-manager-default-appearance-did-change",
-    ForcedAppearanceDidChange: "css-manager-forced-appearance-did-change",
     DefaultUserPreferencesDidChange: "css-manager-default-user-preferences-did-change",
     OverridenUserPreferencesDidChange: "css-manager-overriden-user-preferences-did-change",
 };
 
 WI.CSSManager.UserPreferenceDefaultValue = "System";
 
+// COMPATIBILITY (macOS 13, iOS 16.0): `Page.setForcedAppearance()` was removed in favor of `Page.overrideUserPreference()`
+WI.CSSManager.ForcedAppearancePreference = "ForcedAppearancePreference";
 WI.CSSManager.Appearance = {
-    Light: Symbol("light"),
-    Dark: Symbol("dark"),
+    Light: "Light",
+    Dark: "Dark",
 };
 
 WI.CSSManager.PseudoSelectorNames = {

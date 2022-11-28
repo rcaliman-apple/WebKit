@@ -112,6 +112,32 @@ WI.OverrideUserPreferencesPopover = class OverrideUserPreferencesPopover extends
         let contentElement = document.createElement("div");
         contentElement.classList.add("user-preferences-content");
 
+        let appearanceHeader = contentElement.appendChild(document.createElement("h1"));
+        appearanceHeader.textContent = WI.UIString("Appearance", "Appearance @ User Preferences Overrides", "Header for section with appearance user preferences.");
+
+        // COMPATIBILITY (macOS 13.0, iOS 16.0): `PrefersColorScheme` value for `Page.UserPreferenceName` did not exist yet.
+        if (InspectorBackend.Enum.Page?.UserPreferenceName.PrefersColorScheme) {
+            this._createSelectElement({
+                contentElement,
+                id: "override-prefers-color-scheme",
+                label: WI.UIString("Color scheme", "Color scheme @ User Preferences Overrides", "Label for input to override the preference for color scheme."),
+                preferenceName: InspectorBackend.Enum.Page.UserPreferenceName.PrefersColorScheme,
+                preferenceValues: [InspectorBackend.Enum.Page.UserPreferenceValue.Light, InspectorBackend.Enum.Page.UserPreferenceValue.Dark],
+                defaultValue: WI.CSSManager.UserPreferenceDefaultValue,
+            });
+        }
+        // COMPATIBILITY (macOS 13, iOS 16.0): `Page.setForcedAppearance()` was removed in favor of `Page.overrideUserPreference()`
+        else if (InspectorBackend.hasCommand("Page.setForcedAppearance") && InspectorBackend.Enum.Page.Appearance) {
+            this._createSelectElement({
+                contentElement,
+                id: "override-prefers-color-scheme",
+                label: WI.UIString("Color scheme", "Color scheme @ User Preferences Overrides", "Label for input to override the preference for color scheme."),
+                preferenceName: WI.CSSManager.ForcedAppearancePreference,
+                preferenceValues: [WI.CSSManager.Appearance.Light, WI.CSSManager.Appearance.Dark],
+                defaultValue: WI.CSSManager.UserPreferenceDefaultValue,
+            });
+        }
+
         let accessibilityHeader = contentElement.appendChild(document.createElement("h1"));
         accessibilityHeader.textContent = WI.UIString("Accessibility Preferences", "Accessibility Preferences @ User Preferences Overrides", "Header for section with accessibility user preferences.");
 
@@ -149,6 +175,12 @@ WI.OverrideUserPreferencesPopover = class OverrideUserPreferencesPopover extends
             return WI.UIString("On", "On @ User Preferences Overrides", "Label for a preference that is turned on.");
         case InspectorBackend.Enum.Page.UserPreferenceValue.Off:
             return WI.UIString("Off", "Off @ User Preferences Overrides", "Label for a preference that is turned off.");
+        case InspectorBackend.Enum.Page.UserPreferenceValue.Light:
+        case WI.CSSManager.Appearance.Light:
+            return WI.UIString("Light", "Light @ User Preferences Overrides", "Label for the light color scheme preference.");
+        case InspectorBackend.Enum.Page.UserPreferenceValue.Dark:
+        case WI.CSSManager.Appearance.Dark:
+            return WI.UIString("Dark", "Dark @ User Preferences Overrides", "Label for the dark color scheme preference.");
         }
 
         console.assert(false, "Unknown user preference", preferenceValue);
