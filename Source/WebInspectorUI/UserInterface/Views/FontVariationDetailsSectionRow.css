@@ -1,0 +1,87 @@
+.details-section > .content > .group > .row.font-variation {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: 36px 1fr minmax(max-content, 36px);
+    padding-block: 5px;
+    padding-inline: 20px;
+}
+
+.details-section > .content > .group > .row.font-variation > .label:not(:empty) {
+    grid-column: 1 / -1; /* The variation axis name, if present, spans the full width of the grid container. */
+}
+
+.details-section > .content > .group > .row.font-variation > .tag {
+    grid-column: 1;
+    color: var(--text-color-secondary);
+}
+
+.details-section > .content > .group > .row.font-variation > .value {
+    grid-column: 3;
+    text-align: end;
+    font-variant-numeric: tabular-nums;
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range {
+    display: grid;
+    grid-column: 2;
+    grid-template-columns: 1fr 1fr;
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range > input[type="range"] {
+    appearance: none;
+    grid-column: 1 / -1;
+    position: relative;
+    margin-block: 3px 8px;
+    margin-inline: 0;
+    background-color: transparent;
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range > input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    position: relative;
+    z-index: 2;
+    margin-top: -9px;
+    width: 8px;
+    height: 20px;
+    border-radius: 6px;
+    background: var(--slider-thumb-background);
+    box-shadow: var(--slider-thumb-box-shadow);
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range > input[type="range"]::-webkit-slider-thumb:active {
+    background: var(--slider-thumb-background-active);
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range > input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 4px;
+    box-shadow: var(--slider-track-box-shadow);
+    background: var(--slider-track-background);
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range > input[type="range"]::before,
+.details-section > .content > .group > .row.font-variation > .variation-range > input[type="range"]::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    top: -1px;
+    width: 2px;
+    height: 8px;
+    border-radius: 4px;
+    background-color: var(--slider-track-tick-background);
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range > input[type="range"]::after {
+    right: 0;
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range > .variation-minvalue {
+    grid-column: 1;
+    color: var(--text-color-secondary);
+}
+
+.details-section > .content > .group > .row.font-variation > .variation-range > .variation-maxvalue {
+    grid-column: 2;
+    text-align: end;
+    color: var(--text-color-secondary);
+}

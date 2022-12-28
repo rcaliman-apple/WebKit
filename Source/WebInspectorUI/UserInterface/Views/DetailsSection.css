@@ -180,6 +180,10 @@ body[dir=rtl] .details-section > .header::before {
     border-bottom: 1px solid var(--border-color);
 }
 
+.details-section > .content > .group:has(.row.font-variation) {
+    display: unset; /* Unsets `display: table-row-group` because it affects sizing of child elements that are grid containers. */
+}
+
 .details-section > .content > .group:last-child {
     border-bottom: none;
 }
@@ -187,6 +191,7 @@ body[dir=rtl] .details-section > .header::before {
 .details-section > .content > .group:nth-child(even) {
     background-color: var(--background-color-intermediate);
 }
+
 
 .details-section > .content > .group > .row.simple {
     display: table-row;
@@ -248,11 +253,11 @@ body[dir=rtl] .details-section > .header::before {
     margin-inline-start: 5px;
 }
 
-.details-section > .content > .group > .row.simple:has(.warning) {
+.details-section > .content > .group > .row:is(.simple, .font-variation):has(.warning) {
     background-color: var(--warning-background-color-secondary);
 }
 
-.details-section > .content > .group > .row.simple > .warning {
+.details-section > .content > .group > .row:is(.simple, .font-variation) > .warning {
     position: absolute;
     right: 0;
     display: inline-block;
