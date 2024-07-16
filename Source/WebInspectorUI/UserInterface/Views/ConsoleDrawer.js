@@ -154,7 +154,7 @@ WI.ConsoleDrawer = class ConsoleDrawer extends WI.ContentBrowser
     _updateDrawerHeight(height)
     {
         const minimumHeight = 64;
-        const maximumHeight = this.element.parentNode.offsetHeight - WI.TabBrowser.MinimumHeight - WI.QuickConsole.MinimumHeight;
+        let maximumHeight = this.element.parentNode.offsetHeight - WI.TabBrowser.MinimumHeight - WI.quickConsole.element.offsetHeight;
 
         let heightCSSValue = Number.constrain(height, minimumHeight, maximumHeight) + "px";
         if (this.element.style.height === heightCSSValue)
