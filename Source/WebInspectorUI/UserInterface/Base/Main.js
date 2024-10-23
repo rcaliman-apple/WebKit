@@ -233,9 +233,6 @@ WI.contentLoaded = function()
 
     // Add platform style classes so the UI can be tweaked per-platform.
     document.body.classList.add(WI.Platform.name + "-platform");
-    if (WI.Platform.version.name)
-        document.body.classList.add(WI.Platform.version.name);
-
     document.body.classList.add(WI.sharedApp.debuggableType);
     document.body.setAttribute("dir", WI.resolvedLayoutDirection());
 
@@ -2648,16 +2645,8 @@ WI.undockedTitleAreaHeight = function()
         return 0;
 
     if (WI.Platform.name === "mac") {
-        switch (WI.Platform.version.name) {
-        case "monterey":
-        case "big-sur":
-            /* Keep in sync with `--undocked-title-area-height` CSS variable. */
-            return 27 / WI.getZoomFactor();
-
-        case "catalina":
-            /* Keep in sync with `--undocked-title-area-height` CSS variable. */
-            return 22 / WI.getZoomFactor();
-        }
+        /* Keep in sync with `--undocked-title-area-height` CSS variable. */
+        return 27 / WI.getZoomFactor();
     }
 
     return 0;

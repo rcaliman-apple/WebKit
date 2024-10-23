@@ -386,7 +386,7 @@ body {
         }
     }
 
-    &:is(.mac-platform.monterey, .mac-platform.big-sur) {
+    &.mac-platform {
         --text-color: hsl(0, 0%, 15%);
         --text-color-transparent: hsla(0, 0%, 15%, 0.4);
 
@@ -424,12 +424,8 @@ body {
         }
     }
 
-    &:is(.mac-platform.monterey, .mac-platform.big-sur):not(.docked) {
+    &:not(.docked) {
         --undocked-title-area-height: calc(27px / var(--zoom-factor));
-    }
-
-    &:is(.mac-platform.catalina):not(.docked) {
-        --undocked-title-area-height: calc(22px / var(--zoom-factor));
     }
 
     &.mac-platform {
