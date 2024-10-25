@@ -35,6 +35,13 @@
     overflow: auto;
 }
 
+/* The wrapper acts as a containing block for absolutely positioned descendants like .selection-area that need to span the full width of the scroll container. */
+.content-view.dom-tree > .tree-outline-wrapper {
+    width: fit-content;
+    min-width: 100%;
+    position: relative;
+}
+
 .content-view.dom-tree .tree-outline.dom {
     padding-inline-start: 7px;
     transition: padding 200ms ease-in-out;

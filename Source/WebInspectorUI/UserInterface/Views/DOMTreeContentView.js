@@ -79,7 +79,12 @@ WI.DOMTreeContentView = class DOMTreeContentView extends WI.ContentView
         this._domTreeOutline.addEventListener(WI.DOMTreeOutline.Event.SelectedNodeChanged, this._selectedNodeDidChange, this);
         this._domTreeOutline.wireToDomAgent();
         this._domTreeOutline.editable = true;
-        this.element.appendChild(this._domTreeOutline.element);
+
+        let domTreeWrapperElement = document.createElement("div");
+        domTreeWrapperElement.classList.add("tree-outline-wrapper");
+        domTreeWrapperElement.appendChild(this._domTreeOutline.element);
+
+        this.element.appendChild(domTreeWrapperElement);
 
         WI.domManager.addEventListener(WI.DOMManager.Event.AttributeModified, this._domNodeChanged, this);
         WI.domManager.addEventListener(WI.DOMManager.Event.AttributeRemoved, this._domNodeChanged, this);

@@ -859,7 +859,7 @@ WI.TreeOutline = class TreeOutline extends WI.Object
         // In the no-word-wrap mode the outer <ol> may be wider than the tree container
         // (and partially hidden), in which case we use the edge of its container.
 
-        let scrollContainer = this.element.parentElement;
+        let scrollContainer = this.element.parentElement.parentElement;
         if (scrollContainer.offsetWidth > this.element.offsetWidth)
             scrollContainer = this.element;
 

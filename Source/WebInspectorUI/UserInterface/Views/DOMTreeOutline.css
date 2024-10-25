@@ -39,6 +39,7 @@
     color: var(--text-color);
 
     --item-pseudo-class-indicator-start: 2px;
+    --item-minimum-width: 200px;
 
     --sublist-margin-start: 4px;
     --sublist-padding-start: 1px;
@@ -129,6 +130,7 @@ body:is(.window-inactive, .window-docked-inactive) .content-view.dom-tree.deemph
     padding: 0;
     word-wrap: break-word;
     outline: none;
+    min-width: var(--item-minimum-width);
 
     --item-padding-start: 17px;
     --item-padding-end: 6px;
