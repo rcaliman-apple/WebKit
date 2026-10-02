@@ -32,6 +32,7 @@
 #include "WebAutomationSession.h"
 #include "WebAutomationSessionMacros.h"
 #include "WebDriverBidiProtocolObjects.h"
+#include <WebCore/FloatPoint.h>
 #include <numbers>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
@@ -101,7 +102,11 @@ SimulatedInputSource& State::simulatedSource(const Action& action)
     }
 
     return m_simulatedSources.ensure(action.id, [&] {
-        return SimulatedInputSource::create(simulatedSourceType(*source));
+        auto type = simulatedSourceType(*source);
+        Ref simulatedSource = SimulatedInputSource::create(type);
+        if (type == SimulatedInputSourceType::Mouse || type == SimulatedInputSourceType::Pen || type == SimulatedInputSourceType::Touch)
+            simulatedSource->state.location = std::nullopt;
+        return simulatedSource;
     }).iterator->value.get();
 }
 #endif
@@ -662,6 +667,19 @@ static std::optional<VirtualKey> virtualKeyForKeyValue(const String& value)
     }
 }
 
+// https://w3c.github.io/webdriver/#dfn-dispatch-a-pointerdown-action
+static std::optional<MouseButton> mouseButtonForW3CButton(uint64_t button)
+{
+    switch (button) {
+    case 0: return MouseButton::Left;
+    case 1: return MouseButton::Middle;
+    case 2: return MouseButton::Right;
+    case 3: return MouseButton::Back;
+    case 4: return MouseButton::Forward;
+    default: return std::nullopt;
+    }
+}
+
 // https://w3c.github.io/webdriver/#dfn-dispatch-tick-actions
 static std::expected<Vector<SimulatedInputKeyFrame>, AutomationCommandError> translateTicksToKeyFrames(State& state, const ActionsByTick& actionsByTick, Vector<Action>* cancelEntries)
 {
@@ -674,11 +692,18 @@ static std::expected<Vector<SimulatedInputKeyFrame>, AutomationCommandError> tra
 
     Vector<SimulatedInputKeyFrame> keyFrames;
     for (auto& tick : actionsByTick) {
-        std::optional<uint64_t> tickDuration;
         Vector<SimulatedInputKeyFrame::StateEntry> entries;
         for (auto& action : tick) {
             auto& sourceState = currentState(action);
             sourceState.duration = std::nullopt;
+            if (action.sourceType == SourceType::Pointer) {
+                if (sourceState.mouseInteraction == MouseInteraction::Up)
+                    sourceState.pressedMouseButton = std::nullopt;
+                sourceState.mouseInteraction = std::nullopt;
+                sourceState.origin = std::nullopt;
+                sourceState.nodeHandle = std::nullopt;
+                sourceState.location = std::nullopt;
+            }
             switch (action.type) {
             case ActionType::Pause:
                 break;
@@ -715,15 +740,44 @@ static std::expected<Vector<SimulatedInputKeyFrame>, AutomationCommandError> tra
 #endif
                 }
                 break;
+            case ActionType::PointerDown: {
+                // https://w3c.github.io/webdriver/#dfn-dispatch-a-pointerdown-action
+                auto button = mouseButtonForW3CButton(action.button);
+                if (!button)
+                    return makeUnexpected(AUTOMATION_COMMAND_ERROR_WITH_NAME_AND_MESSAGE(NotImplemented, "This mouse button is not supported."_s));
+                if (sourceState.pressedMouseButton == button)
+                    break;
+                if (sourceState.pressedMouseButton)
+                    return makeUnexpected(AUTOMATION_COMMAND_ERROR_WITH_NAME_AND_MESSAGE(NotImplemented, "Pressing more than one mouse button at a time is not supported."_s));
+                sourceState.pressedMouseButton = button;
+                sourceState.mouseInteraction = MouseInteraction::Down;
+                if (cancelEntries)
+                    cancelEntries->append(Action { action.id, action.sourceType, action.pointerType, ActionType::PointerUp, std::nullopt, { }, action.button });
+                break;
+            }
+            case ActionType::PointerUp: {
+                // https://w3c.github.io/webdriver/#dfn-dispatch-a-pointerup-action
+                auto button = mouseButtonForW3CButton(action.button);
+                if (!button || sourceState.pressedMouseButton != button)
+                    break;
+                sourceState.mouseInteraction = MouseInteraction::Up;
+                break;
+            }
+            case ActionType::PointerMove:
+                // https://w3c.github.io/webdriver/#dfn-dispatch-a-pointermove-action
+                if (action.origin == OriginType::Element)
+                    return makeUnexpected(AUTOMATION_COMMAND_ERROR_WITH_NAME_AND_MESSAGE(NotImplemented, "Element origin is not supported yet."_s));
+                sourceState.mouseInteraction = MouseInteraction::Move;
+                sourceState.origin = action.origin == OriginType::Pointer ? MouseMoveOrigin::Pointer : MouseMoveOrigin::Viewport;
+                sourceState.location = WebCore::flooredIntPoint(WebCore::FloatPoint(action.x, action.y));
+                break;
             default:
                 return makeUnexpected(AUTOMATION_COMMAND_ERROR_WITH_NAME_AND_MESSAGE(NotImplemented, "This input source type is not supported yet."_s));
             }
             if (action.duration)
-                tickDuration = std::max(tickDuration.value_or(0), *action.duration);
+                sourceState.duration = Seconds::fromMilliseconds(*action.duration);
             entries.append({ state.simulatedSource(action), sourceState });
         }
-        if (tickDuration && !entries.isEmpty())
-            entries.first().second.duration = Seconds::fromMilliseconds(*tickDuration);
         keyFrames.append(SimulatedInputKeyFrame { WTF::move(entries) });
     }
 
@@ -773,6 +827,36 @@ BidiInputAgent::BidiInputAgent(WebAutomationSession& session, BackendDispatcher&
 
 BidiInputAgent::~BidiInputAgent() = default;
 
+#if ENABLE(WEBDRIVER_ACTIONS_API)
+static void enqueueDispatch(WebAutomationSession& automationSession, BidiInput::State& state, const String& pageHandle, const String& frameHandle, Function<std::expected<Vector<SimulatedInputKeyFrame>, AutomationCommandError>(BidiInput::State&)>&& buildKeyFrames, Function<void(BidiInput::State&)>&& didDispatch, CommandCallback<void>&& callback)
+{
+    // https://w3c.github.io/webdriver/#dfn-actions-queue
+    state.enqueue([weakSession = WeakPtr { automationSession }, inputState = Ref { state }, pageHandle, frameHandle, buildKeyFrames = WTF::move(buildKeyFrames), didDispatch = WTF::move(didDispatch), callback = WTF::move(callback)](CompletionHandler<void()>&& done) mutable {
+        RefPtr session = weakSession.get();
+        if (!session) {
+            callback(makeUnexpected(STRING_FOR_PREDEFINED_ERROR_NAME(InternalError)));
+            return done();
+        }
+
+        auto keyFrames = buildKeyFrames(inputState);
+        if (!keyFrames) {
+            callback(makeUnexpected(keyFrames.error().toProtocolString()));
+            return done();
+        }
+
+        session->runBidiInputKeyFrames(pageHandle, frameHandle, WTF::move(*keyFrames), inputState->simulatedSources(), [inputState, didDispatch = WTF::move(didDispatch), callback = WTF::move(callback), done = WTF::move(done)](std::optional<AutomationCommandError> error) mutable {
+            if (didDispatch)
+                didDispatch(inputState);
+            if (error)
+                callback(makeUnexpected(error->toProtocolString()));
+            else
+                callback({ });
+            done();
+        });
+    });
+}
+#endif // ENABLE(WEBDRIVER_ACTIONS_API)
+
 BidiInput::State& BidiInputAgent::inputStateForTopLevelContext(const String& pageHandle)
 {
     return m_inputStates.ensure(pageHandle, [] {
@@ -800,29 +884,10 @@ void BidiInputAgent::performActions(const String& context, Ref<JSON::Array>&& ac
     ASYNC_FAIL_WITH_PREDEFINED_ERROR_AND_DETAILS_IF(!actionsByTick, InvalidParameter, actionsByTick.error());
 
 #if ENABLE(WEBDRIVER_ACTIONS_API)
-    // https://w3c.github.io/webdriver/#dfn-actions-queue
-    inputState->enqueue([weakSession = WeakPtr { *session }, inputState, pageHandle, frameHandle, actionsByTick = WTF::move(*actionsByTick), callback = WTF::move(callback)](CompletionHandler<void()>&& done) mutable {
-        RefPtr session = weakSession.get();
-        if (!session) {
-            callback(makeUnexpected(STRING_FOR_PREDEFINED_ERROR_NAME(InternalError)));
-            return done();
-        }
-
+    enqueueDispatch(*session, inputState, pageHandle, frameHandle, [actionsByTick = WTF::move(*actionsByTick)](BidiInput::State& state) {
         // https://w3c.github.io/webdriver/#dfn-dispatch-actions
-        auto keyFrames = BidiInput::keyFramesForActions(inputState, actionsByTick);
-        if (!keyFrames) {
-            callback(makeUnexpected(keyFrames.error().toProtocolString()));
-            return done();
-        }
-
-        session->runBidiInputKeyFrames(pageHandle, frameHandle, WTF::move(*keyFrames), inputState->simulatedSources(), [inputState, callback = WTF::move(callback), done = WTF::move(done)](std::optional<AutomationCommandError> error) mutable {
-            if (error)
-                callback(makeUnexpected(error->toProtocolString()));
-            else
-                callback({ });
-            done();
-        });
-    });
+        return BidiInput::keyFramesForActions(state, actionsByTick);
+    }, nullptr, WTF::move(callback));
 #else
     ASYNC_FAIL_WITH_PREDEFINED_ERROR(NotImplemented);
 #endif
@@ -840,33 +905,15 @@ void BidiInputAgent::releaseActions(const String& context, CommandCallback<void>
     Ref inputState = inputStateForTopLevelContext(pageHandle);
 
 #if ENABLE(WEBDRIVER_ACTIONS_API)
-    // https://w3c.github.io/webdriver/#dfn-actions-queue
-    inputState->enqueue([weakSession = WeakPtr { *session }, inputState, pageHandle, frameHandle, callback = WTF::move(callback)](CompletionHandler<void()>&& done) mutable {
-        RefPtr session = weakSession.get();
-        if (!session) {
-            callback(makeUnexpected(STRING_FOR_PREDEFINED_ERROR_NAME(InternalError)));
-            return done();
-        }
-
+    enqueueDispatch(*session, inputState, pageHandle, frameHandle, [](BidiInput::State& state) {
         // https://w3c.github.io/webdriver/#dfn-input-cancel-list
-        auto undoActions = std::exchange(inputState->inputCancelList(), { });
+        auto undoActions = std::exchange(state.inputCancelList(), { });
         undoActions.reverse();
-        auto keyFrames = BidiInput::keyFramesForUndoActions(inputState, WTF::move(undoActions));
-        if (!keyFrames) {
-            callback(makeUnexpected(keyFrames.error().toProtocolString()));
-            return done();
-        }
-
-        session->runBidiInputKeyFrames(pageHandle, frameHandle, WTF::move(*keyFrames), inputState->simulatedSources(), [inputState, callback = WTF::move(callback), done = WTF::move(done)](std::optional<AutomationCommandError> error) mutable {
-            // https://w3c.github.io/webdriver/#dfn-reset-the-input-state
-            inputState->reset();
-            if (error)
-                callback(makeUnexpected(error->toProtocolString()));
-            else
-                callback({ });
-            done();
-        });
-    });
+        return BidiInput::keyFramesForUndoActions(state, WTF::move(undoActions));
+    }, [](BidiInput::State& state) {
+        // https://w3c.github.io/webdriver/#dfn-reset-the-input-state
+        state.reset();
+    }, WTF::move(callback));
 #else
     inputState->reset();
     callback({ });

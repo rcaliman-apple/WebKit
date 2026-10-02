@@ -2393,13 +2393,54 @@ void WebAutomationSession::runBidiInputKeyFrames(const String& pageHandle, const
         return;
     }
 
-    inputDispatcher->run(frameID, WTF::move(keyFrames), inputSources, [protectedThis = Ref { *this }, weakPage = WeakPtr { *page }, completionHandler = WTF::move(completionHandler)](std::optional<AutomationCommandError> error) mutable {
+    auto runWithViewport = [protectedThis = Ref { *this }, weakPage = WeakPtr { *page }, frameID, keyFrames = WTF::move(keyFrames), inputSources = HashMap<String, Ref<SimulatedInputSource>> { inputSources }, completionHandler = WTF::move(completionHandler)](std::optional<WebCore::FloatRect> viewport) mutable {
         // https://w3c.github.io/webdriver-bidi/#get-a-navigable
         RefPtr page = weakPage.get();
-        if (!page || page->isClosed())
-            error = AUTOMATION_COMMAND_ERROR_WITH_NAME(FrameNotFound);
-        completionHandler(WTF::move(error));
-    });
+        if (!viewport || !page || page->isClosed()) {
+            completionHandler(AUTOMATION_COMMAND_ERROR_WITH_NAME(FrameNotFound));
+            return;
+        }
+
+        Ref inputDispatcher = protectedThis->inputDispatcherForPage(*page);
+        if (inputDispatcher->isActive()) {
+            completionHandler(AUTOMATION_COMMAND_ERROR_WITH_NAME_AND_MESSAGE(InternalError, "Another interaction sequence is already running on this page."_s));
+            return;
+        }
+
+        inputDispatcher->run(frameID, WTF::move(keyFrames), inputSources, SimulatedInputRunOptions { SimulatedInputViewport { viewport->location(), viewport->size() }, true }, [protectedThis = WTF::move(protectedThis), weakPage = WTF::move(weakPage), completionHandler = WTF::move(completionHandler)](std::optional<AutomationCommandError> error) mutable {
+            // https://w3c.github.io/webdriver-bidi/#get-a-navigable
+            RefPtr page = weakPage.get();
+            if (!page || page->isClosed())
+                error = AUTOMATION_COMMAND_ERROR_WITH_NAME(FrameNotFound);
+            completionHandler(WTF::move(error));
+        });
+    };
+
+    WTF::CompletionHandler<void(std::optional<String>&&, std::optional<WebCore::FloatRect>&&)> didGetFrameViewportHandler = [weakPage = WeakPtr { *page }, frameID, runWithViewport = WTF::move(runWithViewport)](std::optional<String>&& optionalError, std::optional<WebCore::FloatRect>&& viewport) mutable {
+        RefPtr page = weakPage.get();
+        if (!viewport || optionalError || !page) {
+            runWithViewport(std::nullopt);
+            return;
+        }
+
+        auto localRootFrameID = localRootFrameNeedingMainFrameConversion(frameID, CoordinateSystem::LayoutViewport);
+        if (!localRootFrameID) {
+            runWithViewport(WTF::move(viewport));
+            return;
+        }
+
+        page->convertPointToMainFrameCoordinates(viewport->location(), *localRootFrameID, [page = protect(*page), size = viewport->size(), runWithViewport = WTF::move(runWithViewport)](std::optional<WebCore::FloatPoint> convertedOrigin) mutable {
+            if (!convertedOrigin) {
+                runWithViewport(std::nullopt);
+                return;
+            }
+
+            convertedOrigin->move(obscuredContentInsetOffset(page.get()));
+            runWithViewport(WebCore::FloatRect { *convertedOrigin, size });
+        });
+    };
+
+    page->sendWithAsyncReplyToProcessContainingFrameWithoutDestinationIdentifier(frameID, Messages::WebAutomationSessionProxy::FrameViewportInLayoutViewport(page->webPageIDInProcessForFrame(frameID), frameID), WTF::move(didGetFrameViewportHandler));
 }
 #endif // ENABLE(WEBDRIVER_ACTIONS_API)
 #endif // ENABLE(WEBDRIVER_BIDI)
@@ -3019,7 +3060,7 @@ void WebAutomationSession::performInteractionSequence(const Inspector::Protocol:
     }
 
     // Delegate the rest of §17.4 Dispatching Actions to the dispatcher.
-    inputDispatcher->run(frameID, WTF::move(keyFrames), m_inputSources, [protectedThis = Ref { *this }, callback = WTF::move(callback)](std::optional<AutomationCommandError> error) {
+    inputDispatcher->run(frameID, WTF::move(keyFrames), m_inputSources, SimulatedInputRunOptions { }, [protectedThis = Ref { *this }, callback = WTF::move(callback)](std::optional<AutomationCommandError> error) {
         if (error)
             callback(makeUnexpected(error.value().toProtocolString()));
         else
@@ -3046,7 +3087,7 @@ void WebAutomationSession::cancelInteractionSequence(const Inspector::Protocol::
     Ref inputDispatcher = inputDispatcherForPage(*page);
     inputDispatcher->cancel();
     
-    inputDispatcher->run(frameID, WTF::move(keyFrames), m_inputSources, [this, protectedThis = Ref { *this }, callback = WTF::move(callback)](std::optional<AutomationCommandError> error) {
+    inputDispatcher->run(frameID, WTF::move(keyFrames), m_inputSources, SimulatedInputRunOptions { }, [this, protectedThis = Ref { *this }, callback = WTF::move(callback)](std::optional<AutomationCommandError> error) {
         if (error)
             callback(makeUnexpected(error.value().toProtocolString()));
         else
